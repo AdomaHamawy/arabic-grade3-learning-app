@@ -1,0 +1,8 @@
+{
+  "name": "Remix مغامرات أحمد ومريم – لغتي الجميلة",
+  "description": "تطبيق تعليمي تفاعلي متكامل لمادة اللغة العربية للصف الثالث الابتدائي بالرسوم ثلاثية الأبعاد والألعاب والدروس التمثيلية والتقييمات المدرسية المعتمدة.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
