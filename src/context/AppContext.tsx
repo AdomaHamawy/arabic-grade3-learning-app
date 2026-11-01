@@ -40,7 +40,7 @@ const INITIAL_PROGRESS: UserProgress = {
   gameScores: {},
   savedReflections: {},
   soundEnabled: true,
-  autoplayAudio: true,
+  autoplayAudio: false,
 };
 
 const LEVEL_TITLES = [
@@ -59,7 +59,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
-        return JSON.parse(stored);
+        const parsed = JSON.parse(stored);
+        return {
+          ...INITIAL_PROGRESS,
+          ...parsed,
+          autoplayAudio: false, // Respect browser autoplay restrictions
+        };
       }
     } catch {
       // ignore

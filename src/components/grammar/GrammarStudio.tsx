@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { playSound, speakArabic, stopSpeaking } from '../../services/soundEffects';
 import { useApp } from '../../context/AppContext';
-import { Sparkles, BookOpen, Volume2, CheckCircle2, ArrowRightLeft, Layers, PenTool, HelpCircle } from 'lucide-react';
+import { Sparkles, BookOpen, Volume2, VolumeX, CheckCircle2, ArrowRightLeft, Layers, PenTool, HelpCircle } from 'lucide-react';
 
 interface GrammarTopic {
   id: string;
@@ -236,8 +236,19 @@ export const GrammarStudio: React.FC = () => {
 
   const activeTopic = GRAMMAR_TOPICS.find((t) => t.id === selectedTopicId) || GRAMMAR_TOPICS[0];
 
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+    };
+  }, []);
+
   const handleSpeakRule = (topic: GrammarTopic) => {
     playSound.click();
+    if (isSpeaking) {
+      stopSpeaking();
+      setIsSpeaking(false);
+      return;
+    }
     setIsSpeaking(true);
     speakArabic(topic.summary, {
       voiceType: 'male_teacher',
@@ -251,13 +262,6 @@ export const GrammarStudio: React.FC = () => {
     stopSpeaking();
     setIsSpeaking(false);
     setSelectedTopicId(topic.id);
-
-    // If autoplay is enabled, immediately pronounce the selected grammar rule
-    if (progress.autoplayAudio) {
-      setTimeout(() => {
-        handleSpeakRule(topic);
-      }, 150);
-    }
   };
 
   const handleSpeakQuestion = (key: string, text: string) => {
@@ -392,8 +396,8 @@ export const GrammarStudio: React.FC = () => {
                 : 'bg-emerald-600 hover:bg-emerald-700 text-white'
             }`}
           >
-            <Volume2 className="w-5 h-5" />
-            <span>{isSpeaking ? 'يتم الشرح الصوتي الآن (اضغط للإيقاف) 🔊' : 'استمع لشرح القاعدة بصوت المعلم 🎙️'}</span>
+            {isSpeaking ? <VolumeX className="w-5 h-5 text-slate-950" /> : <Volume2 className="w-5 h-5" />}
+            <span>{isSpeaking ? 'يتم الشرح الصوتي الآن (اضغط للإيقاف) ⏹️' : 'استمع لشرح القاعدة بصوت المعلم 🎙️'}</span>
           </button>
         </div>
 

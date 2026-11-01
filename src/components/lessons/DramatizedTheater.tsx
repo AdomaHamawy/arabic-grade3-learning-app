@@ -67,24 +67,14 @@ export const DramatizedTheater: React.FC<DramatizedTheaterProps> = ({ scene, onS
     setCurrentLineIndex(0);
     setQuizAnswered(null);
     setShowExplanation(false);
-    if (progress.autoplayAudio) {
-      setIsPlaying(true);
-      isPlayingRef.current = true;
-      const timer = setTimeout(() => {
-        triggerSpeakLine(0);
-      }, 200);
-      return () => {
-        clearTimeout(timer);
-        stopSpeaking();
-      };
-    } else {
-      setIsPlaying(false);
-      isPlayingRef.current = false;
-    }
+    setIsPlaying(false);
+    isPlayingRef.current = false;
+    setIsSpeaking(false);
+    stopSpeaking();
     return () => {
       stopSpeaking();
     };
-  }, [scene.id, progress.autoplayAudio]);
+  }, [scene.id]);
 
   const handleNext = () => {
     stopSpeaking();

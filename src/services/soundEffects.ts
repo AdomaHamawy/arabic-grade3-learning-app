@@ -141,29 +141,102 @@ export const playSound = {
 };
 
 // ========================================================
-// Web Speech API Engine with Intelligent Voice Detection
+// Web Speech API Engine with Intelligent Voice Detection & Fallback
 // ========================================================
-let arabicVoiceCache: SpeechSynthesisVoice | null = null;
+let arabicVoiceCache: SpeechSynthesisVoice[] = [];
 let currentAudioElement: HTMLAudioElement | null = null;
 let activeSpeechToken: number = 0;
-let resumeInterval: any = null;
+let resumeInterval: ReturnType<typeof setInterval> | null = null;
 
 // Clean text for speech synthesis (strip emojis, markdown, symbols that confuse TTS)
 export function sanitizeArabicForSpeech(raw: string): string {
   if (!raw) return '';
   return raw
     .replace(/[•*#_~`🎬🎤🎙️🔊👦👧🧔👨‍🏫💡💬🌟⭐🎯✍️🔗🌸🔔⛔👥👉✂️❓]/g, ' ')
+    .replace(/["«»]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-export function getArabicVoice(): SpeechSynthesisVoice | null {
+// Populate and cache voices reliably across browsers
+function refreshVoiceList(): SpeechSynthesisVoice[] {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return [];
+  try {
+    const list = window.speechSynthesis.getVoices();
+    if (list && list.length > 0) {
+      arabicVoiceCache = list;
+    }
+  } catch {
+    // ignore
+  }
+  return arabicVoiceCache;
+}
+
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  try {
+    refreshVoiceList();
+    window.speechSynthesis.onvoiceschanged = () => {
+      refreshVoiceList();
+    };
+  } catch {
+    // ignore
+  }
+}
+
+export function getArabicVoice(
+  voiceType?: 'child_ahmed' | 'child_maryam' | 'male_teacher'
+): SpeechSynthesisVoice | null {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
-  const voices = window.speechSynthesis.getVoices();
+  const voices = refreshVoiceList();
   if (!voices || voices.length === 0) return null;
 
+  // Filter all Arabic voices
+  const arVoices = voices.filter(
+    (v) =>
+      v.lang.toLowerCase().startsWith('ar') ||
+      v.name.toLowerCase().includes('arabic') ||
+      v.name.includes('عربي')
+  );
+
+  if (arVoices.length === 0) return null;
+
+  // If Maryam (Egyptian school girl), prefer female Arabic voices
+  if (voiceType === 'child_maryam') {
+    const femaleVoice = arVoices.find((v) => {
+      const n = v.name.toLowerCase();
+      return (
+        n.includes('salma') ||
+        n.includes('hoda') ||
+        n.includes('laila') ||
+        n.includes('mariam') ||
+        n.includes('maryam') ||
+        n.includes('zeina') ||
+        n.includes('zariyah') ||
+        n.includes('fatima') ||
+        n.includes('nour')
+      );
+    });
+    if (femaleVoice) return femaleVoice;
+  }
+
+  // If Ahmed (Egyptian school boy) or Teacher, prefer male Arabic voices
+  if (voiceType === 'child_ahmed' || voiceType === 'male_teacher') {
+    const maleVoice = arVoices.find((v) => {
+      const n = v.name.toLowerCase();
+      return (
+        n.includes('maged') ||
+        n.includes('tarik') ||
+        n.includes('shakir') ||
+        n.includes('naayf') ||
+        n.includes('youssef') ||
+        n.includes('hamed')
+      );
+    });
+    if (maleVoice) return maleVoice;
+  }
+
   // 1. Exact Egyptian Arabic voice
-  const egVoice = voices.find(
+  const egVoice = arVoices.find(
     (v) =>
       v.lang === 'ar-EG' ||
       v.lang === 'ar_EG' ||
@@ -172,55 +245,30 @@ export function getArabicVoice(): SpeechSynthesisVoice | null {
   );
   if (egVoice) return egVoice;
 
-  // 2. Any Arabic lang code (ar-SA, ar-XA, ar-AE, etc.)
-  const anyArVoice = voices.find((v) => v.lang.toLowerCase().startsWith('ar'));
-  if (anyArVoice) return anyArVoice;
-
-  // 3. Any voice with Arabic name or localized keywords
-  const namedArVoice = voices.find((v) => {
-    const name = v.name.toLowerCase();
-    return (
-      name.includes('arabic') ||
-      name.includes('عربي') ||
-      name.includes('maged') ||
-      name.includes('tarik') ||
-      name.includes('laila') ||
-      name.includes('mariam') ||
-      name.includes('maryam') ||
-      name.includes('hoda') ||
-      name.includes('naayf') ||
-      name.includes('salma') ||
-      name.includes('youssef') ||
-      name.includes('shakir')
-    );
-  });
-  if (namedArVoice) return namedArVoice;
-
-  return null;
+  // 2. Any Arabic voice (ar-SA, ar-XA, etc.)
+  return arVoices[0];
 }
 
-// Pre-warm voices on load
-if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-  try {
-    arabicVoiceCache = getArabicVoice();
-    window.speechSynthesis.onvoiceschanged = () => {
-      arabicVoiceCache = getArabicVoice();
-    };
-  } catch {
-    // ignore
-  }
-}
+let activeAbortController: AbortController | null = null;
 
 export function stopSpeaking() {
   activeSpeechToken++;
+  if (activeAbortController) {
+    activeAbortController.abort();
+    activeAbortController = null;
+  }
   if (resumeInterval) {
     clearInterval(resumeInterval);
     resumeInterval = null;
   }
+  if (typeof window !== 'undefined') {
+    (window as unknown as { __activeSpeechUtterance: SpeechSynthesisUtterance | null }).__activeSpeechUtterance = null;
+  }
   if (currentAudioElement) {
     try {
       currentAudioElement.pause();
-      currentAudioElement.currentTime = 0;
+      currentAudioElement.src = '';
+      currentAudioElement.load();
     } catch {
       // ignore
     }
@@ -237,11 +285,10 @@ export function stopSpeaking() {
 
 /**
  * Direct Audio Streaming Engine:
- * Plays crystal-clear Arabic speech immediately via HTML5 Audio element.
- * Works 100% reliably across all operating systems, browsers, and devices
- * without requiring any locally installed Arabic voice packs.
+ * Uses fetch with credentials + Blob objectUrl to seamlessly support preview iframes,
+ * cross-origin proxies, and all mobile/desktop browsers without cookie dropping.
  */
-export function playAudioStream(
+export async function playAudioStream(
   text: string,
   options?: {
     voiceType?: 'male_teacher' | 'child_ahmed' | 'child_maryam';
@@ -252,7 +299,30 @@ export function playAudioStream(
 ) {
   try {
     const url = `/api/audio?text=${encodeURIComponent(text)}&voiceType=${options?.voiceType || 'male_teacher'}`;
-    const audio = new Audio(url);
+
+    if (activeAbortController) {
+      activeAbortController.abort();
+    }
+    const abortController = new AbortController();
+    activeAbortController = abortController;
+
+    // Use fetch with credentials to ensure session cookies and tokens pass inside iframes/proxies
+    const res = await fetch(url, {
+      credentials: 'include',
+      signal: abortController.signal,
+    });
+
+    if (!res.ok) {
+      throw new Error(`Audio fetch failed with HTTP ${res.status}`);
+    }
+
+    if (token !== activeSpeechToken) return;
+
+    const blob = await res.blob();
+    if (token !== activeSpeechToken) return;
+
+    const objectUrl = URL.createObjectURL(blob);
+    const audio = new Audio(objectUrl);
     currentAudioElement = audio;
 
     let hasStarted = false;
@@ -265,6 +335,7 @@ export function playAudioStream(
     };
 
     audio.onended = () => {
+      URL.revokeObjectURL(objectUrl);
       if (token === activeSpeechToken) {
         currentAudioElement = null;
         if (options?.onEnd) options.onEnd();
@@ -272,7 +343,8 @@ export function playAudioStream(
     };
 
     audio.onerror = (e) => {
-      console.warn('Audio stream element error, attempting base64 fallback:', e);
+      URL.revokeObjectURL(objectUrl);
+      console.warn('Audio blob element error, attempting base64 fallback:', e);
       if (token === activeSpeechToken) {
         fallbackServerTTS(text, options, token);
       }
@@ -287,23 +359,27 @@ export function playAudioStream(
           }
         })
         .catch((err) => {
-          console.warn('Audio play interrupted or prevented:', err);
-          if (token === activeSpeechToken && options?.onEnd) {
-            options.onEnd();
+          URL.revokeObjectURL(objectUrl);
+          console.warn('Audio play interrupted or prevented by browser:', err);
+          if (token === activeSpeechToken) {
+            fallbackServerTTS(text, options, token);
           }
         });
     }
-  } catch (err) {
-    console.warn('Direct audio play failed:', err);
-    fallbackServerTTS(text, options, token);
+  } catch (err: any) {
+    if (err?.name === 'AbortError') return;
+    console.warn('Direct audio fetch failed, attempting base64 fallback:', err);
+    if (token === activeSpeechToken) {
+      fallbackServerTTS(text, options, token);
+    }
   }
 }
 
 /**
  * Universal Arabic Synthesizer:
- * Executes synchronously upon user click gestures.
- * If browser has a verified Arabic voice pack, uses Web Speech API.
- * Otherwise, immediately streams high-clarity Arabic audio so the user hears voice instantly.
+ * 1. Checks if a verified Arabic voice pack is available in the browser/OS.
+ * 2. If an Arabic voice is present, uses Web Speech API with tuned pitch/rate.
+ * 3. If NO Arabic voice is present in the OS, directly streams crystal-clear audio from the server.
  */
 export function speakArabic(
   text: string,
@@ -325,34 +401,39 @@ export function speakArabic(
   // Wake up Web Audio Context immediately on user click gesture
   getAudioContext();
 
-  // Check if the browser actually has a native Arabic voice installed
-  const nativeArabicVoice = arabicVoiceCache || getArabicVoice();
+  const hasSpeechSynthesis = typeof window !== 'undefined' && 'speechSynthesis' in window;
+  const verifiedArabicVoice = hasSpeechSynthesis ? getArabicVoice(options?.voiceType) : null;
 
-  if (nativeArabicVoice && 'speechSynthesis' in window) {
+  // ONLY use Web Speech API if the browser actually has a verified Arabic voice installed!
+  // If the OS has no Arabic voice (like standard Windows or unconfigured browsers),
+  // calling speechSynthesis results in total silence. Instead, directly stream audio!
+  if (hasSpeechSynthesis && verifiedArabicVoice) {
     try {
       if (window.speechSynthesis.paused) {
         window.speechSynthesis.resume();
       }
 
       const utterance = new SpeechSynthesisUtterance(cleanedText);
-      utterance.voice = nativeArabicVoice;
-      utterance.lang = nativeArabicVoice.lang || 'ar-SA';
+      utterance.voice = verifiedArabicVoice;
+      utterance.lang = verifiedArabicVoice.lang || 'ar-EG';
 
+      // Authentic child & teacher vocal pitch and rate calibration
       if (options?.voiceType === 'child_ahmed') {
-        utterance.pitch = 1.35;
+        utterance.pitch = 1.30; // Cheerful Egyptian boy tone
         utterance.rate = 1.0;
       } else if (options?.voiceType === 'child_maryam') {
-        utterance.pitch = 1.45;
+        utterance.pitch = 1.42; // Gentle Egyptian girl tone
         utterance.rate = 1.0;
       } else {
-        utterance.pitch = 0.95;
-        utterance.rate = 0.92;
+        utterance.pitch = 1.0; // Clear articulate teacher tone
+        utterance.rate = 0.94;
       }
 
-      let started = false;
+      // CRITICAL FOR CHROMIUM / ANDROID CHROME:
+      // Prevent Garbage Collection from silencing the utterance mid-playback
+      (window as unknown as { __activeSpeechUtterance: SpeechSynthesisUtterance | null }).__activeSpeechUtterance = utterance;
 
       utterance.onstart = () => {
-        started = true;
         if (token === activeSpeechToken && options?.onStart) {
           options.onStart();
         }
@@ -363,6 +444,7 @@ export function speakArabic(
           clearInterval(resumeInterval);
           resumeInterval = null;
         }
+        (window as unknown as { __activeSpeechUtterance: SpeechSynthesisUtterance | null }).__activeSpeechUtterance = null;
         if (token === activeSpeechToken && options?.onEnd) {
           options.onEnd();
         }
@@ -373,12 +455,18 @@ export function speakArabic(
           clearInterval(resumeInterval);
           resumeInterval = null;
         }
+        (window as unknown as { __activeSpeechUtterance: SpeechSynthesisUtterance | null }).__activeSpeechUtterance = null;
+
+        // Ignore intentional user cancels
         if (event?.error === 'canceled' || event?.error === 'interrupted') return;
+
+        console.warn('Web Speech API error, falling back to direct stream:', event?.error);
         if (token === activeSpeechToken) {
           playAudioStream(cleanedText, options, token);
         }
       };
 
+      // Keepalive heartbeat for Chromium 14-second pause bug
       if (resumeInterval) clearInterval(resumeInterval);
       resumeInterval = setInterval(() => {
         if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -386,25 +474,16 @@ export function speakArabic(
             window.speechSynthesis.resume();
           }
         }
-      }, 4000);
+      }, 2500);
 
       window.speechSynthesis.speak(utterance);
-
-      // Watchdog: If Web Speech fails to actually emit sound within 350ms, switch to stream
-      setTimeout(() => {
-        if (token === activeSpeechToken && !started && (!window.speechSynthesis.speaking || window.speechSynthesis.paused)) {
-          console.info('Web speech voice stalled, switching to direct stream');
-          stopSpeaking();
-          playAudioStream(cleanedText, options, token);
-        }
-      }, 350);
       return;
     } catch (e) {
-      console.warn('Web Speech API execution failed, switching to direct stream:', e);
+      console.warn('Web Speech API execution failed, falling back to direct stream:', e);
     }
   }
 
-  // If no native Arabic voice is installed on client OS, play directly via audio stream
+  // If no native Arabic voice is installed on client OS, stream directly via audio element
   playAudioStream(cleanedText, options, token);
 }
 
@@ -466,3 +545,4 @@ async function fallbackServerTTS(
     options.onEnd();
   }
 }
+

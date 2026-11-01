@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CURRICULUM_UNITS } from '../../data/curriculumData';
 import { Lesson, Unit } from '../../types/curriculum';
 import { useApp } from '../../context/AppContext';
@@ -14,6 +14,7 @@ import {
   BookOpen,
   Sparkles,
   Volume2,
+  VolumeX,
   CheckCircle,
   Award,
   PenTool,
@@ -36,6 +37,16 @@ export const LessonsHub: React.FC = () => {
   const [reflectionSaved, setReflectionSaved] = useState(false);
   const [activeSpeakingText, setActiveSpeakingText] = useState<string | null>(null);
   const [activeVocabId, setActiveVocabId] = useState<string | null>(null);
+  const [activeAudioKey, setActiveAudioKey] = useState<string | null>(null);
+  const [isReadingFullLesson, setIsReadingFullLesson] = useState(false);
+  const fullLessonReadingRef = React.useRef(false);
+
+  useEffect(() => {
+    return () => {
+      fullLessonReadingRef.current = false;
+      stopSpeaking();
+    };
+  }, []);
 
   const activeUnit = CURRICULUM_UNITS.find((u) => u.id === selectedUnitId) || CURRICULUM_UNITS[0];
   const activeLesson = activeUnit.lessons.find((l) => l.id === selectedLessonId) || activeUnit.lessons[0];
@@ -57,6 +68,10 @@ export const LessonsHub: React.FC = () => {
   };
 
   const handleSpeakVocabPart = (partKey: string, textToSpeak: string) => {
+    if (isReadingFullLesson) {
+      setIsReadingFullLesson(false);
+      fullLessonReadingRef.current = false;
+    }
     if (activeVocabId === partKey) {
       stopSpeaking();
       setActiveVocabId(null);
@@ -74,6 +89,8 @@ export const LessonsHub: React.FC = () => {
   const handleLessonSelect = (lesson: Lesson) => {
     playSound.click();
     stopSpeaking();
+    fullLessonReadingRef.current = false;
+    setIsReadingFullLesson(false);
     setActiveSpeakingText(null);
     setSelectedLessonId(lesson.id);
     setActiveTab('theater');
@@ -99,7 +116,52 @@ export const LessonsHub: React.FC = () => {
     addStars(3);
   };
 
+  const handleReadFullLesson = (paragraphIndex: number = 0) => {
+    if (paragraphIndex >= activeLesson.fullText.length) {
+      setIsReadingFullLesson(false);
+      fullLessonReadingRef.current = false;
+      setActiveSpeakingText(null);
+      return;
+    }
+    const para = activeLesson.fullText[paragraphIndex];
+    setActiveSpeakingText(para);
+    setIsReadingFullLesson(true);
+    fullLessonReadingRef.current = true;
+
+    speakArabic(para, {
+      voiceType: 'male_teacher',
+      onStart: () => setActiveSpeakingText(para),
+      onEnd: () => {
+        if (fullLessonReadingRef.current) {
+          setTimeout(() => {
+            if (fullLessonReadingRef.current) {
+              handleReadFullLesson(paragraphIndex + 1);
+            }
+          }, 500);
+        } else {
+          setActiveSpeakingText(null);
+        }
+      },
+    });
+  };
+
+  const handleToggleFullLessonReading = () => {
+    playSound.click();
+    if (isReadingFullLesson) {
+      stopSpeaking();
+      setIsReadingFullLesson(false);
+      fullLessonReadingRef.current = false;
+      setActiveSpeakingText(null);
+    } else {
+      handleReadFullLesson(0);
+    }
+  };
+
   const handleSpeakParagraph = (text: string) => {
+    if (isReadingFullLesson) {
+      setIsReadingFullLesson(false);
+      fullLessonReadingRef.current = false;
+    }
     if (activeSpeakingText === text) {
       stopSpeaking();
       setActiveSpeakingText(null);
@@ -114,30 +176,38 @@ export const LessonsHub: React.FC = () => {
     });
   };
 
+  const handleToggleSpeech = (
+    key: string,
+    text: string,
+    voiceType: 'child_ahmed' | 'child_maryam' | 'male_teacher' = 'male_teacher'
+  ) => {
+    if (isReadingFullLesson) {
+      setIsReadingFullLesson(false);
+      fullLessonReadingRef.current = false;
+    }
+    if (activeAudioKey === key) {
+      stopSpeaking();
+      setActiveAudioKey(null);
+      return;
+    }
+    playSound.click();
+    setActiveAudioKey(key);
+    speakArabic(text, {
+      voiceType,
+      onStart: () => setActiveAudioKey(key),
+      onEnd: () => setActiveAudioKey(null),
+    });
+  };
+
   const handleTabChange = (tabId: typeof activeTab) => {
     playSound.click();
     stopSpeaking();
+    fullLessonReadingRef.current = false;
+    setIsReadingFullLesson(false);
     setActiveSpeakingText(null);
     setActiveVocabId(null);
+    setActiveAudioKey(null);
     setActiveTab(tabId);
-
-    if (progress.autoplayAudio) {
-      if (tabId === 'text' && activeLesson.fullText.length > 0) {
-        setTimeout(() => {
-          handleSpeakParagraph(activeLesson.fullText[0]);
-        }, 200);
-      } else if (tabId === 'vocabulary' && activeLesson.vocabulary.length > 0) {
-        const firstVocab = activeLesson.vocabulary[0];
-        const fullKey = `${firstVocab.id}-full`;
-        setTimeout(() => {
-          handleSpeakVocabPart(fullKey, buildFullVocabSpeech(firstVocab));
-        }, 200);
-      } else if (tabId === 'grammar' && activeLesson.grammarFocus) {
-        setTimeout(() => {
-          speakArabic(activeLesson.grammarFocus.ruleSummary, { voiceType: 'male_teacher' });
-        }, 200);
-      }
-    }
   };
 
   return (
@@ -327,14 +397,37 @@ export const LessonsHub: React.FC = () => {
       {/* Tab 2: Full Vocalized Lesson Text */}
       {activeTab === 'text' && (
         <div className="bg-white rounded-3xl p-6 md:p-8 border-2 border-emerald-100 shadow-sm space-y-6">
-          <div className="flex items-center justify-between pb-4 border-b-2 border-emerald-100">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b-2 border-emerald-100">
             <div>
               <h3 className="text-xl font-black text-emerald-950">النَّصُّ الْقِرَائِيُّ الْمَشْكُولُ</h3>
-              <p className="text-xs text-slate-500 font-medium">اضغط على أي فقرة أو أيقونة الصوت للاستماع إليها بالتشكيل السليم</p>
+              <p className="text-xs text-slate-500 font-medium">اضغط للاستماع إلى قراءة النص كاملاً أو كل فقرة على حدة بالتشكيل السليم</p>
             </div>
-            <span className="text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-1.5 rounded-xl">
-              الصفحة {activeLesson.pageReference}
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleToggleFullLessonReading}
+                className={`px-4 py-2 rounded-2xl text-xs md:text-sm font-black flex items-center gap-2 transition-all cursor-pointer shadow-md ${
+                  isReadingFullLesson
+                    ? 'bg-rose-500 hover:bg-rose-600 text-white ring-4 ring-rose-200'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}
+                title={isReadingFullLesson ? 'إيقاف قراءة الدرس' : 'استمع إلى قراءة النص كاملاً فقرة وراء فقرة'}
+              >
+                {isReadingFullLesson ? (
+                  <>
+                    <VolumeX className="w-4 h-4 text-white" />
+                    <span>إيقاف قراءة الدرس ⏹️</span>
+                  </>
+                ) : (
+                  <>
+                    <Volume2 className="w-4 h-4 text-amber-300" />
+                    <span>استمع لقراءة الدرس كاملاً 🎙️</span>
+                  </>
+                )}
+              </button>
+              <span className="text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 px-3 py-2 rounded-xl">
+                الصفحة {activeLesson.pageReference}
+              </span>
+            </div>
           </div>
 
           <div className="space-y-4">
@@ -353,12 +446,12 @@ export const LessonsHub: React.FC = () => {
                     onClick={() => handleSpeakParagraph(para)}
                     className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-xs ${
                       isCurrentlyPlaying
-                        ? 'bg-amber-400 text-slate-950 font-black animate-pulse'
+                        ? 'bg-rose-500 hover:bg-rose-600 text-white font-black ring-4 ring-rose-200'
                         : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                     }`}
                     title={isCurrentlyPlaying ? 'إيقاف الصوت' : 'استمع للفقرة'}
                   >
-                    <Volume2 className="w-5 h-5" />
+                    {isCurrentlyPlaying ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
                   </button>
                   <div className="flex-1 space-y-1">
                     {isCurrentlyPlaying && (
@@ -570,15 +663,22 @@ export const LessonsHub: React.FC = () => {
                 {activeLesson.grammarFocus.ruleSummary}
               </p>
               <button
-                onClick={() => {
-                  playSound.click();
-                  speakArabic(activeLesson.grammarFocus.ruleSummary, { voiceType: 'male_teacher' });
-                }}
-                className="mr-3 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer shadow-xs"
-                title="استمع لشرح القاعدة"
+                onClick={() =>
+                  handleToggleSpeech(
+                    'grammar-rule',
+                    activeLesson.grammarFocus.ruleSummary,
+                    'male_teacher'
+                  )
+                }
+                className={`mr-3 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer shadow-xs ${
+                  activeAudioKey === 'grammar-rule'
+                    ? 'bg-rose-600 text-white ring-2 ring-rose-300'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                }`}
+                title={activeAudioKey === 'grammar-rule' ? 'إيقاف الصوت' : 'استمع لشرح القاعدة'}
               >
-                <Volume2 className="w-3.5 h-3.5" />
-                <span>استمع 🔊</span>
+                {activeAudioKey === 'grammar-rule' ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                <span>{activeAudioKey === 'grammar-rule' ? 'إيقاف ⏹️' : 'استمع 🔊'}</span>
               </button>
             </div>
 
@@ -588,11 +688,15 @@ export const LessonsHub: React.FC = () => {
                 <div key={i} className="p-3.5 bg-white border-2 border-emerald-200 rounded-xl font-bold text-slate-800 text-sm flex items-center justify-between">
                   <span>{ex}</span>
                   <button
-                    onClick={() => speakArabic(ex, { voiceType: 'male_teacher' })}
-                    className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg cursor-pointer"
-                    title="استمع للمثال"
+                    onClick={() => handleToggleSpeech(`grammar-ex-${i}`, ex, 'male_teacher')}
+                    className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
+                      activeAudioKey === `grammar-ex-${i}`
+                        ? 'text-rose-600 bg-rose-50 ring-1 ring-rose-300'
+                        : 'text-emerald-600 hover:bg-emerald-50'
+                    }`}
+                    title={activeAudioKey === `grammar-ex-${i}` ? 'إيقاف' : 'استمع للمثال'}
                   >
-                    <Volume2 className="w-4 h-4" />
+                    {activeAudioKey === `grammar-ex-${i}` ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                   </button>
                 </div>
               ))}
@@ -616,15 +720,22 @@ export const LessonsHub: React.FC = () => {
                 {activeLesson.spellingFocus.ruleSummary}
               </p>
               <button
-                onClick={() => {
-                  playSound.click();
-                  speakArabic(activeLesson.spellingFocus.ruleSummary, { voiceType: 'male_teacher' });
-                }}
-                className="mr-3 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer shadow-xs"
-                title="استمع للقاعدة الإملائية"
+                onClick={() =>
+                  handleToggleSpeech(
+                    'spelling-rule',
+                    activeLesson.spellingFocus.ruleSummary,
+                    'male_teacher'
+                  )
+                }
+                className={`mr-3 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer shadow-xs ${
+                  activeAudioKey === 'spelling-rule'
+                    ? 'bg-rose-600 text-white ring-2 ring-rose-300'
+                    : 'bg-teal-600 hover:bg-teal-700 text-white'
+                }`}
+                title={activeAudioKey === 'spelling-rule' ? 'إيقاف الصوت' : 'استمع للقاعدة الإملائية'}
               >
-                <Volume2 className="w-3.5 h-3.5" />
-                <span>استمع 🔊</span>
+                {activeAudioKey === 'spelling-rule' ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                <span>{activeAudioKey === 'spelling-rule' ? 'إيقاف ⏹️' : 'استمع 🔊'}</span>
               </button>
             </div>
 
@@ -634,11 +745,15 @@ export const LessonsHub: React.FC = () => {
                 <div key={i} className="p-3.5 bg-white border-2 border-teal-200 rounded-xl font-bold text-slate-800 text-sm flex items-center justify-between">
                   <span>{ex}</span>
                   <button
-                    onClick={() => speakArabic(ex, { voiceType: 'male_teacher' })}
-                    className="p-1 text-teal-600 hover:bg-teal-50 rounded-lg cursor-pointer"
-                    title="استمع للكلمة"
+                    onClick={() => handleToggleSpeech(`spelling-ex-${i}`, ex, 'male_teacher')}
+                    className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
+                      activeAudioKey === `spelling-ex-${i}`
+                        ? 'text-rose-600 bg-rose-50 ring-1 ring-rose-300'
+                        : 'text-teal-600 hover:bg-teal-50'
+                    }`}
+                    title={activeAudioKey === `spelling-ex-${i}` ? 'إيقاف' : 'استمع للكلمة'}
                   >
-                    <Volume2 className="w-4 h-4" />
+                    {activeAudioKey === `spelling-ex-${i}` ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
                   </button>
                 </div>
               ))}

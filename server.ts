@@ -20,6 +20,18 @@ const port = parseInt(process.env.PORT || '3000', 10);
 
 app.use(express.json());
 
+// Enable CORS and audio streaming headers for all requests
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Range');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
   httpOptions: {
@@ -71,7 +83,7 @@ async function fetchGoogleArabicTTS(text: string): Promise<Buffer> {
   return Buffer.concat(buffers);
 }
 
-// Generate Arabic audio buffer using Gemini (primary) with Google Arabic TTS fallback
+// Generate Arabic audio buffer with high-clarity reading pronunciation and character voices
 async function getArabicAudio(text: string, voiceType?: string): Promise<{ buffer: Buffer; mimeType: string }> {
   const cleanText = text.trim();
   const cacheKey = `${voiceType || 'default'}-${cleanText}`;
@@ -80,33 +92,39 @@ async function getArabicAudio(text: string, voiceType?: string): Promise<{ buffe
     return audioBufferCache.get(cacheKey)!;
   }
 
-  // 1. Try Gemini 3.8 Flash Lite TTS first
+  // 1. For reading lesson paragraphs (educational texts with full tashkeel/diacritics),
+  // Google Arabic TTS provides instant (<450ms) classical pronunciation with exact diacritics accuracy
+  if (voiceType === 'male_teacher' && cleanText.length > 80) {
+    try {
+      const mp3Buffer = await fetchGoogleArabicTTS(cleanText);
+      const result = { buffer: mp3Buffer, mimeType: 'audio/mpeg' };
+      if (audioBufferCache.size > 200) {
+        const firstKey = audioBufferCache.keys().next().value;
+        if (firstKey) audioBufferCache.delete(firstKey);
+      }
+      audioBufferCache.set(cacheKey, result);
+      return result;
+    } catch (err) {
+      console.warn('Google Arabic TTS failed for reading text, trying Gemini:', err);
+    }
+  }
+
+  // 2. For character dialogues (Ahmed & Maryam), use Gemini 3.8 Flash Lite TTS with race timeout
   if (process.env.GEMINI_API_KEY) {
     try {
       let voiceName = 'Puck'; // Ahmed
-      let promptStyle = 'Enthusiastic friendly Egyptian boy';
-
       if (voiceType === 'child_maryam') {
         voiceName = 'Kore'; // Maryam
-        promptStyle = 'Curious gentle Egyptian girl speaking warmly';
       } else if (voiceType === 'male_teacher') {
         voiceName = 'Charon'; // Teacher
-        promptStyle = 'Inspiring articulate elementary school Arabic teacher';
       }
 
-      const response = await ai.models.generateContent({
+      const geminiPromise = ai.models.generateContent({
         model: 'gemini-3.8-flash-lite-tts',
         contents: [
           {
             role: 'user',
-            parts: [
-              {
-                text: cleanText,
-                speechMetadata: {
-                  style: promptStyle,
-                },
-              },
-            ],
+            parts: [{ text: cleanText }],
           },
         ],
         config: {
@@ -119,6 +137,11 @@ async function getArabicAudio(text: string, voiceType?: string): Promise<{ buffe
         },
       });
 
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Gemini TTS timeout (2500ms)')), 2500)
+      );
+
+      const response = await Promise.race([geminiPromise, timeoutPromise]);
       const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
       if (base64Audio) {
         const buffer = Buffer.from(base64Audio, 'base64');
@@ -131,11 +154,11 @@ async function getArabicAudio(text: string, voiceType?: string): Promise<{ buffe
         return result;
       }
     } catch (geminiError: any) {
-      console.warn('Gemini TTS failed or quota exceeded, switching to Google Arabic TTS fallback:', geminiError?.message || geminiError);
+      console.warn('Gemini TTS timed out or failed, using Google Arabic TTS:', geminiError?.message || geminiError);
     }
   }
 
-  // 2. High-reliability Google Arabic TTS fallback
+  // 3. High-reliability Google Arabic TTS
   const mp3Buffer = await fetchGoogleArabicTTS(cleanText);
   const result = { buffer: mp3Buffer, mimeType: 'audio/mpeg' };
 
@@ -160,6 +183,7 @@ app.get('/api/audio', async (req, res) => {
     const { buffer, mimeType } = await getArabicAudio(text, voiceType);
     res.setHeader('Content-Type', mimeType);
     res.setHeader('Content-Length', buffer.length.toString());
+    res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Cache-Control', 'public, max-age=86400');
     return res.end(buffer);
   } catch (err: any) {

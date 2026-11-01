@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { GAMES_CATALOG, GameDefinition } from '../../data/curriculumData';
-import { playSound, speakArabic } from '../../services/soundEffects';
+import { playSound, speakArabic, stopSpeaking } from '../../services/soundEffects';
 import { useApp } from '../../context/AppContext';
 import {
   Gamepad2,
@@ -17,6 +17,7 @@ import {
   ArrowRight,
   Star,
   Volume2,
+  VolumeX,
   Shuffle
 } from 'lucide-react';
 
@@ -788,12 +789,29 @@ function GameListeningQuiz() {
 
   const [idx, setIdx] = useState(0);
   const [ans, setAns] = useState<number | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+    };
+  }, []);
 
   const cur = audioQuizzes[idx];
 
   const handlePlayVoice = () => {
     playSound.click();
-    speakArabic(cur.audioText, { voiceType: 'male_teacher' });
+    if (isSpeaking) {
+      stopSpeaking();
+      setIsSpeaking(false);
+      return;
+    }
+    setIsSpeaking(true);
+    speakArabic(cur.audioText, {
+      voiceType: 'male_teacher',
+      onStart: () => setIsSpeaking(true),
+      onEnd: () => setIsSpeaking(false),
+    });
   };
 
   const handlePick = (i: number) => {
@@ -812,10 +830,14 @@ function GameListeningQuiz() {
       <div className="text-center space-y-3">
         <button
           onClick={handlePlayVoice}
-          className="bg-amber-400 hover:bg-amber-500 text-slate-950 font-black px-6 py-3 rounded-2xl shadow-md inline-flex items-center gap-2 cursor-pointer transition-transform hover:scale-105"
+          className={`${
+            isSpeaking
+              ? 'bg-rose-500 hover:bg-rose-600 text-white ring-4 ring-rose-200'
+              : 'bg-amber-400 hover:bg-amber-500 text-slate-950'
+          } font-black px-6 py-3 rounded-2xl shadow-md inline-flex items-center gap-2 cursor-pointer transition-transform hover:scale-105`}
         >
-          <Volume2 className="w-6 h-6" />
-          <span>اضغط هنا للاستماع إلى النص المسموع 🎙️</span>
+          {isSpeaking ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
+          <span>{isSpeaking ? 'إيقاف الاستماع ⏹️' : 'اضغط هنا للاستماع إلى النص المسموع 🎙️'}</span>
         </button>
         <p className="text-xs text-slate-500">استمع بتركيز جيد ثم أجب عن السؤال</p>
       </div>

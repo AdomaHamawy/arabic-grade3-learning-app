@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { playSound, speakArabic } from '../../services/soundEffects';
+import { playSound, speakArabic, stopSpeaking } from '../../services/soundEffects';
 import {
   Sparkles,
   BookOpen,
@@ -14,6 +14,7 @@ import {
   FileCheck,
   Award,
   Volume2,
+  VolumeX,
   Star,
   ChevronLeft,
   Flame,
@@ -26,6 +27,13 @@ interface HomeScreenProps {
 
 export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
   const { progress, currentLevelTitle } = useApp();
+  const [isGreetingPlaying, setIsGreetingPlaying] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      stopSpeaking();
+    };
+  }, []);
 
   const heroImage = '/src/assets/images/learning_adventure_hero_1793515762923.jpg';
   const ahmedAvatar = '/src/assets/images/ahmed_3d_avatar_1793515761332.jpg';
@@ -33,9 +41,19 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
 
   const handleGreetingAudio = () => {
     playSound.click();
+    if (isGreetingPlaying) {
+      stopSpeaking();
+      setIsGreetingPlaying(false);
+      return;
+    }
+    setIsGreetingPlaying(true);
     speakArabic(
       `أهلاً وسهلاً بك يا بطل! أنا أحمد ودي مريم.. يلا بينا ننطلق في مغامرات لغتي الجميلة للصف الثالث الابتدائي، نتعلم ونمثل ونلعب سوا ونجمع النجوم!`,
-      { voiceType: progress.avatar === 'ahmed' ? 'child_ahmed' : 'child_maryam' }
+      {
+        voiceType: progress.avatar === 'ahmed' ? 'child_ahmed' : 'child_maryam',
+        onStart: () => setIsGreetingPlaying(true),
+        onEnd: () => setIsGreetingPlaying(false),
+      }
     );
   };
 
@@ -60,10 +78,23 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({ onNavigate }) => {
               </span>
               <button
                 onClick={handleGreetingAudio}
-                className="bg-white/20 hover:bg-white/30 text-white backdrop-blur-md px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer border border-white/30"
+                className={`${
+                  isGreetingPlaying
+                    ? 'bg-rose-500 hover:bg-rose-600 text-white ring-2 ring-rose-300'
+                    : 'bg-white/20 hover:bg-white/30 text-white border border-white/30'
+                } backdrop-blur-md px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer`}
               >
-                <Volume2 className="w-3.5 h-3.5 text-amber-300" />
-                <span>استمع لتحية أحمد ومريم 🎙️</span>
+                {isGreetingPlaying ? (
+                  <>
+                    <VolumeX className="w-3.5 h-3.5 text-white" />
+                    <span>إيقاف التحية ⏹️</span>
+                  </>
+                ) : (
+                  <>
+                    <Volume2 className="w-3.5 h-3.5 text-amber-300" />
+                    <span>استمع لتحية أحمد ومريم 🎙️</span>
+                  </>
+                )}
               </button>
             </div>
 
